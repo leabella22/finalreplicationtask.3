@@ -1,0 +1,500 @@
+---
+title: "GRAD-C6-2001: Statistics II — Replication Paper"
+subtitle: "Ares, Macarena and Enrique Hernandez (2018). The corrosive effect of corruption on trust in politicians: Evidence from a natural experiment. Research & Politics"
+author: "leabella22"
+date: "June 08, 2021"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    theme: cosmo
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      eval = TRUE,
+                      error = FALSE,
+                      message = FALSE,
+                      warning = FALSE,
+                      fig.align = "center")
+```
+
+---
+
+## Install Packages (See Code)<br><br><br>
+
+```{r warning=FALSE, message=FALSE}
+library(dplyr) # for data wrangling
+library(ggplot2) # for creating plots
+library(ggdag)
+library(rdrobust) # for rdrobust()
+library(readr) # for loading the .csv data
+library(stargazer)
+library(knitr)
+library(kableExtra)
+library(KernSmooth)
+library(rdd)
+library(plm)
+library(ggalt)
+library(ggthemes)
+library(ggplot2)
+library(sjlabelled)
+library(haven)
+library(gtrendsR)
+library(fastDummies)
+```
+---
+
+## **Introduction : Fact Sheet** <br><br>
+
+> The paper by Ares and Hernández explores the potentially negative causal relationship between corruption scandals and ensuing political trust of the public. A natural experiment on the coincidental uncovering of the ground-breaking Bárcenas corruption scandal in Spain and fielddata of the European Social Survey (23 January to 12 May, 2013) served as the reference data for their analysis.<br> 
+> The paper lamented that ambiguous findings on the corruption effect often lack the time-specific considerations (attitudes recover after shocks) , and might overestimate the negative effect of scandals on political trust when only taking their isolated relationship into consideration. Lastly, they highlighted that partisanship might moderate the behaviour of individuals towards corrupt politicians.<br>
+> The quasi-experimental identification strategy set out to include an exogenous variable (time of interview pre- and post-scandal) to detect variations in levels of corruption and assigning control and treatment group “as-if-random” to pre and post-scandal stages respectively.
+The strategy comprises the ignorability assumption and exclusion restriction - as the interviewing time only influences the treatment assignment and not the outcome.<br><br><br>
+
+> **H1:** Exposure to relevant and salient corruption scandals will reduce trust in politicians<br><br>
+> **H2:** The negative effect of corruption scandals on trust in politicians will be stronger in the days following their disclosure and will decay over time<br><br> 
+> **H3:** The negative effects of corruption scandals on trust in politicians will be weaker among the supporters of the party involved in the scandal<br><br><br>
+
+> *Reported Results as follows:*<br>
+> **(i) the corruption scandal significantly reduced individual trust in politicians;**<br> 
+> **(ii) the effect of the scandal was not as long lasting and decreased gradually in the days following the uncovering;**<br> 
+> **(iii) the effect of the scandal was not weaker among party sympathizers** <br><br><br>
+
+> **Main Modelling Strategy**: OLS, RDD<br><br><br><br>
+> **Potential threats to models**:<br><br>
+
+> * *Potential selection bias (reachability bias)*<br> 
+There could be systematic differences in trust that are unrelated to the treatment)<br>
+> **Solution:**Researchers conduct balance test. <br><br>
+
+> * *Threat to Robustness through reachability bias*:<br> 
+> **Solution:** Proxy of reachability indicator - number of times individuals declined - secondly regional-(reached)-fixed effects, only including regions with estimates for both treatment and control groups <br><br>
+
+> * *Ignorability assumption could be threatened through other unobserved factors (inducing omitted variable bias)*  
+> **Solution:** Simulation data with 1000 placebo events , less than 5 % produce a negative statistically significant effect <br><br>
+
+> * *Ignorability assumption could be threatened by timing of the interviews* <br>
+> **Solution:** Fictitious event two years after the scandal became known to the public (31 January 2015), counterfactual evaluation with the simultaneous ESS interviews with Danes (no impact of Bárcenas scandal) <br><br><br>
+
+> *We illustrated the Corruption Effect by Ares and Hernández (2017) in a DAG below under inclusion of pre-treatment covariates that were included in the regression models.*  <br><br>
+
+```{r, message = FALSE,warning = FALSE}
+#Create Dag on corruption Effect
+rp_dag <- dagify(
+  y ~ x + a + b + c + d + e,
+  x ~ a + b + c + d + e,
+  exposure = "x",
+  outcome = "y",
+  labels = c(y = "Political Trust", x = "Exposure to Barcenas Scandal", 
+             a = "Predisposed Partisanship", b = "Age", c="Gender", d="Years of Education", e="Employment Status"),
+  coords = list(x = c(x = 1, a = 3, b = 1, c=3, d=2, e=1,  y = 3),
+                y = c(x = 2, a = -1, b = 4, c=4, d=4, e=-1, y = 2)))
+
+#Visualize DAG
+ggdag_status(rp_dag, 
+use_labels = "label", text = FALSE) +
+guides(fill = FALSE, color = FALSE) + 
+ggtitle("Corruption effect by Ares and Hernández (2018)")+
+    theme_dag(base_size = 14) +
+  theme(legend.position = "none", strip.text = element_blank()) 
+
+```
+
+## **Data Preparation** (See Code) <br><br>
+> Note : as the researchers specified the election_winner variable as one for people voting PP and 0 for all others, they turn a significant amount of NA's into 0 thereby misconstruing the output. We considered this and recoded the election_winner variable accordingly. Thereby the results for the models will differ from the original output. 
+
+```{r, message = FALSE, warning = FALSE}
+
+####Preparation of Data####
+
+#Load data set
+ESS_df_b <- haven::read_dta("ess_6_spain.dta")
+ESS_df_b <- as.data.frame(ESS_df_b)
+
+#Generating the treatment variable to cover the same days as in Spain
+ESS_df_b <- ESS_df_b %>% dplyr::mutate(D_exposure_barcenas =
+ifelse(inwmms == 1 & inwdds < 31, 0, 
+ifelse(inwmms == 1 & inwdds == 31, 1, 
+ifelse(inwmms == 2 & inwdds < 29, 1, NA))))
+   
+#Elections winner variable with corrected output
+ESS_df_b$prtvtces = as.factor(ESS_df_b$prtvtces)
+ESS_df_b <- ESS_df_b %>% dplyr::mutate(election_winner = ifelse(prtvtces==1, 1, 
+                                                             ifelse(is.na(prtvtces)==TRUE, NA, 0)))
+
+#Recoding activty variable and generating dummies
+ESS_df_b <- ESS_df_b %>% dplyr::mutate(mnactic = as.factor(mnactic)) #converts numeric to factor
+
+ESS_df_b <- ESS_df_b %>% dplyr::mutate(employment = ifelse(mnactic == 4, 3,
+                                                        ifelse(mnactic == 6, 5,
+                                                              ifelse(mnactic == 8, 5, mnactic))))
+
+ESS_df_b <- ESS_df_b %>% dplyr::mutate(employment = ifelse(employment == 1, "Paid Work",
+                                                        ifelse(employment == 2, "In education",
+                                                              ifelse(employment == 3, "Unemployed", 
+                                                                     ifelse(employment == 5, "Out of labor market",
+                                                                             ifelse(employment == 8, "Out of labor market",
+                                                                                    ifelse(employment == 9, "Other", employment)))))))
+                                              
+emp_paid_work <- ESS_df_b %>% dplyr::mutate(emp_paid_work = ifelse(employment =="Paid Work", 1,0))
+emp_in_education <- ESS_df_b %>% dplyr::mutate(emp_in_education = ifelse(employment =="In education", 1,0))
+emp_unemployed <- ESS_df_b %>% dplyr::mutate(emp_unemployed = ifelse(employment =="Unemployed",1,0))
+emp_out_labor <- ESS_df_b %>% dplyr::mutate(emp_out_labor = ifelse(employment =="Out of labour market",1,0))
+emp_other <- ESS_df_b %>% dplyr::mutate(emp_other=ifelse(employment =="Other",1,0))   
+
+#Time variable for the months of January and February
+ESS_df_b <- ESS_df_b %>% 
+  dplyr::mutate(time = ifelse(D_exposure_barcenas == "NA", NA,
+     ifelse(D_exposure_barcenas == 0, (inwdds - 31),
+        ifelse(inwdds == 31,0,inwdds))))
+                                     
+#create time variable for whole survey period
+ESS_df_b <- ESS_df_b %>% dplyr::mutate(time_whole = ifelse(inwmms==3, 28+inwdds,
+                                                        ifelse(inwmms==4, 59+inwdds,
+                                                              ifelse(inwmms==5, 89+inwdds,time))))
+                                     
+#Alternative D_exposure_barcenas variable considering the whole survey fieldwork (to study decay of the D_exposure_barcenas effect)
+ESS_df_b <- ESS_df_b %>% dplyr::mutate(treatment1 = ifelse(inwmms == 1 & inwdds < 31, 0,
+                                                        ifelse(inwmms > 1, 1,
+                                                              ifelse(inwmms == 1 & inwdds == 31, 1, 1))))
+
+```
+
+## **Figure 1: Google trends for the search ‘caso barcenas’**.<br><br>
+> *Searches rapidly rose in salience on 31 January, Figure 1 summarizes the relative frequencies of Google searches about the scandal.*<br><br>
+
+```{r}
+#Load gtrends data and recode in date format
+library(haven)
+g_trends <- read_dta("g_trends.dta")
+g_trends$day <- as.Date(g_trends$day, format = "%d-%b-%y")
+
+# Plot gtrends searches on days
+ggplot(g_trends, x = day) + geom_line(aes(x = day, y = caso_barcenas_searches)) + labs(y = "Relative Google searches", x = "Month", title = "Google search for the search 'caso barcenas'", caption = "Red dashed line indicates January 31st")  + geom_vline(xintercept = as.numeric(as.Date("2013-01-31")), color = "#cc0055", linetype = "dashed") + theme(plot.title = element_text(hjust=0.5, size=rel(1.2)))
+
+```
+
+## **Table 2 - Summary of the results of the regression models **<br><br> 
+> *The first model provides a naive estimation of the treatment effect of on political trust.*
+> *Second and third model of the regression table include (pre-treatment) covariates and region-fixed effects to account for Spanish regions that did not retain observations from both treatment and control groups. The third model also interacts the treatment indicator Di and the election winner variable to explore the moderating role of partisanship further.*<br><br>
+```{r, message=FALSE}
+
+#unlabel data set to enable plm() function
+ESS_df_b<- unlabel(ESS_df_b, verbose = FALSE)
+
+#Model 1 treatment effect
+Model_1 <- lm(trstplt ~ D_exposure_barcenas, data= ESS_df_b)
+
+#Model 2 - pre-treatment covariates + region-fixed effects
+Model_2 <-plm(trstplt ~ D_exposure_barcenas + election_winner + gndr + eduyrs + agea + as.factor(employment),  
+index="region", data = ESS_df_b, model="within")
+
+#Model 3 - interaction and pre-treatment covariates on trust + pre-treatment covariates + region-fixed effects
+Model_3 <- plm(trstplt ~ D_exposure_barcenas*election_winner + gndr + eduyrs + agea + as.factor(employment), index="region", data = ESS_df_b, model="within")
+```
+
+## **Replication of Regression Table 2**<br>
+> *As discussed previously, with the correction of the elction_winner variable Model 2 and 3 produce different results from the original. The treatment effect in both model is now much smaller and not statistically significant anymore.*<br><br>
+
+```{r pressure, echo=FALSE}
+#create regression table for all three models
+stargazer::stargazer(Model_1, Model_2, Model_3, header=FALSE, type="text",
+                     title = "OLS regression models. Dependent variable: trust in politicians",
+                     style="asr",
+                     report="vc*s",
+                     digits = 3,
+                     keep = c("D_exposure_barcenas",
+                              "election_winner",
+                              "gndr",
+                              "eduyrs",
+                              "agea",
+                              "employment",
+                              "Constant"),
+                     omit.stat = c("ser", "f", "adj.rsq"),
+                     notes = "Standard errors in parentheses",
+                     notes.align = "l",
+                     covariate.labels = c("D (Exposure to the Bárcenas scandal)",
+                                          "Election winner (wrong)",
+                                          "Election winner (correct)",
+                                          "Female", "Years of education",
+                                          "Age", "Employment: Out of the labour market (Ref: Other)", 
+                                          "Employment: Paid Work (Ref: Other)",                                                                                               
+                                          "Employment: Unemployed (Ref: Other)", "Election winner*D (corrected)"),
+                     add.lines = list(c("Region Fixed Effects", "No", "Yes", "Yes")),
+                     model.names = FALSE,
+                     model.numbers = TRUE,
+                     dep.var.labels.include = FALSE,
+                     column.labels   = c("Model 1", "Model 2", "Model 3"),
+                     column.separate = c(3)
+                     )
+
+```
+
+
+## **Figure 2 - Change in Political Trust **<br><br> 
+
+> *Figure 2 summarizes the levels of trust in politicians (a moving average of 2 days) during the months of January and February. The findings indicate a -0.5 point drop in average trust levels after the scandal.*
+
+```{r echo=FALSE}
+
+ESS_df_b <- unlabel(ESS_df_b, verbose = FALSE)
+
+#Plot distributions of observations and smoothed political trust
+ggplot(ESS_df_b) +
+geom_histogram(aes(x=time), binwidth=1, color="cornsilk", fill="paleturquoise4") +  
+  geom_smooth(aes(x=time,y=trstplt * (100/2.4), shape=as.factor(D_exposure_barcenas), color=as.factor(D_exposure_barcenas)), method="glm", formula= y~poly(x, 5), se=T, fill="#9ca4b1") + 
+  scale_x_continuous(name = "Day(s) since scandal (0 = January 31st)") + 
+  scale_y_continuous(name = "Trust in Politicians") + 
+  theme(legend.title=element_blank(), legend.position = "bottom") +
+  scale_colour_discrete(labels=c("Trust in Politicians (D=0)", "Trust in Politicians (D=1)"))+
+  labs(title = "Figure 2: Change in trust in Politicians at time of Bárcenas scandal",
+       caption = "Note: Trust in politicians is measured on a 0-10 scale, where 10 indicates complete trust.")
+
+```
+
+
+
+## **Figure 3 - Decay of Treatment Effect** <br><br>  
+> *The graph captures the "decay of the treatment effect" and summarizes how the treatment estimate changes as individuals later interviewed. The trend line in Figure 3 dis- plays a decay of the effect over time. With the incorporation of those earlier and those later interview to the treatment group, the further away they were interviewed from the scandal, the more the coefficient Di decreases in size (In May effect shrinks to −0.32 and is no longer statistically significant).* <br><br> 
+
+```{r echo=FALSE}
+
+### Replicate Figure 3 with correct election winner variable
+ESS_df_b <- unlabel(ESS_df_b, verbose = FALSE)
+
+## Create additional auxiliary vectors and dataframes outside of the dat_clean to focus on decay
+coef_lm_df <- data.frame(1)
+coef_lm_pvalue <- NULL
+time_lm <- NULL
+
+# Calculate linear models with changing time intervals using the alternative treatment variable created at the beginning "treatment1" and extracting the coefficients
+for (i in 0:19) {
+  add_days <- i*5
+  temp_subset <- subset(ESS_df_b, subset = ESS_df_b$time_whole < 7 + add_days)
+  temp_lm <- plm(trstplt ~ treatment1 + election_winner + gndr + eduyrs + agea + employment, index=c("region"),model="within", data = temp_subset)
+  coef_lm_df <- rbind(coef_lm_df, temp_lm$coefficients[1])
+  time_lm <- append(time_lm, 7+add_days)
+  coef_lm_pvalue <- append(coef_lm_pvalue, summary(temp_lm)$coefficients[1,4])
+}
+
+# Binding the results from above into a data frame that can be used for the plotting
+coef_lm_df <- coef_lm_df[-1,]
+coef_lm_df <- as.data.frame(cbind(coef_lm_df, coef_lm_pvalue, time_lm))
+colnames(coef_lm_df) <- c("Treatment_effect", "pvalues", "time")
+coef_lm_df$significant <- with(coef_lm_df, ifelse(pvalues < 0.05, 1, 0))
+
+# deleting the labels from the variables to be able to use plm() again
+coef_lm_df_c <- unlabel(coef_lm_df, verbose = FALSE)
+coef_lm_df_c$significant <- as_factor(coef_lm_df_c$significant)
+
+# turn number of days since scandal into dates
+coef_lm_df_c$time
+coef_lm_df_c$dates <- as.Date(coef_lm_df_c$time-1, origin = '2013-01-31')
+
+## Plotting the effect of the scandal over time with correct 
+ggplot(data = coef_lm_df_c) + 
+  geom_point(aes(x=dates, y=Treatment_effect, shape=significant), colour = "red", size = 3, fill="white") +
+  geom_line(aes(x=dates, y=Treatment_effect), linetype = "dashed") +
+  scale_y_reverse() +
+  scale_x_date(date_breaks = "5 day", date_labels = "%B %d") +
+  labs(title="Change in Treatment Effect over Time", caption="\nNote: The x-axis indicates the last day included in the treatment group.") + ylab("Treatment effect (Coefficient D)") + 
+  theme(legend.position='bottom',axis.title.x = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), panel.background = element_rect(fill = "white", colour = "grey50"), panel.grid.major.y = element_line(colour = "grey90")) +
+  scale_shape_discrete(name=" Coefficient D ", breaks=c("1","0"), labels=c(" Signficant at 5%-level ", " Not significant at 5%-level "))
+```
+
+## **Table A9 : Regression Discontiuity Design as an alternative to OLS** <br><br> 
+> *Estimation of RDD using varying bandwidths, for all the corruption scandal has a substantial negative effect on trust in politicians.*<br><br> 
+
+```{r echo=FALSE}
+## RDD estimation
+ESS_df <- read_dta("ess_6_spain.dta")
+ESS_df_b <- ESS_df %>% mutate(D_exposure_barcenas = ifelse(inwmms == 1 & inwdds < 31,0, ifelse(inwmms == 1 & inwdds == 31, 1, ifelse(inwmms == 2 & inwdds < 29, 1, NA)))) 
+
+#create time variable for whole survey period
+ESS_df_b <- ESS_df_b %>% dplyr::mutate(time = ifelse(D_exposure_barcenas == "NA", NA,
+                                                   ifelse(D_exposure_barcenas == 0, (inwdds - 31),
+                                                          ifelse(inwdds == 31,0,inwdds))))
+                                     
+
+# Running an RDD with the forcing variable time and the threshold time = 0
+RD_est <- RDestimate(trstplt ~ time, data = ESS_df_b, cutpoint = 0, kernel = "triangular")
+## Plotting RDD estimates
+
+# Bind DF with RDD results
+RDD_df <- data.frame(1,1,1) # initialize df
+RDD_df <- rbind(RDD_df, RD_est$est, RD_est$p, RD_est$se, RD_est$bw) #Pick interesting estimates
+RDD_df[-6,] <- round(RDD_df[-6,], digits=3) #round values to three digits
+RDD_df <- rbind(RDD_df, c("Trinagular", "Triangular", "Triangular"), as.character(RD_est$obs)) #include Kernel information
+RDD_df <- RDD_df[-1,] # Dump intialization row
+
+# Adjust names of rows and columns
+rownames(RDD_df) <- c("RD estimate", "p-value", "Standard error", "Bandwidth", "Kernel type", "Number of observations")
+colnames(RDD_df) <- c("Model-17 (Standard BW)", "Model-18 (Half BW)", "Model-19 (Double BW)")
+
+# Kable table for RDD estimation
+RDD_df %>%
+  kable(caption="Table A9: RDD summary results. Dependent variable: Trust in politicans", align = "l") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "responsive"), full_width=F, position="left") %>%
+  footnote(general = "Standard erroer clustered by region \n p-value < 0.001: significant at 0.1% level \n p-value < 0.01: significant at 1% level \n p-value < 0.05: significant at 5% level \n p-value < 0.1: significant at 10% level")
+
+```
+
+## **Extension**<br><br>
+> *The following extension uses available data to extend on the theoretical and empirical foundations of the original Research Paper.*<br><br><br>
+
+## Confounding Variables<br><br><br>
+> *Exposure to Mass Media*<br><br>
+As mass media tends to cover political issues differently, often with a stronger focus on, f.i. persons over issues, shortcomings over solutions or simplification over complexity [Kepplinger, 1998). This may certainly further reinforce individuals' (negative) views of politics.<br><br>
+In the ESS6 variables allow the measurement of the “total time spent on the traditional media” (TV, Radio and Newspapers), and importantly,  ʺthe total time spent on political issues and current affairs in the media” (Coromina et. al., 2012).<br> The literal question asked to participants to measure the tvpol variable is: “And again on an average weekday, how much of your time watching television is spent watching news or programmes about politics and current affairs?”<br><br> 
+While the use of online-media hadn't been explicitly integrated in ESS Round 6, we can rely on TV as the main source of political information for individuals in Spain. According to Eurobarometer, television remains the preferred information source for national and European affairs in most member states in 2013.<br><br>
+
+> *Political Interest*<br><br>
+The differential effect of media coverage individual reactions to corruption, a precondition for its effect can be one's political interest and following susceptibility to stronger reactions (Fletcher, Park, 2017).<br>
+The capacity to develop a certain level of political trust as well as accessing information on political issues could be shaped by one's political interest in the first place. Hence, we would include the polintr variable (how intrested one is in politics) from the ESS6 data, but drop the tvpol variable for the new model to avoid post-treatment bias (tvpol as mediator to polintr affecting trust).<br><br>Another variable to regard, that closely connects to pre-treatment bases of social trust might have been political participation. But due to both probably being mutually constitutive, while trust might be prerequisite for participation, distrust can motivate non-systemic participation, we might abstain from its inclusion (Hooghe , Marien, 2012).<br><br>
+
+> *Economic situation*<br><br>
+Some research has argued that voters may trade-off and overlook corruption for their well-being when faced with a trade-off questionnaire if the economic situation was favourable. While in cases of a bad or declaring economic situation, a stronger response towards corrupt politicians was triggered (Zechmeister and Zizumbo-Colunga 2013, Vaz Mondo, 2019).<br><br>
+In Hernandez et. al model' employment status might not be indicative of job or overall economic satisfaction as baseline differences of individuals in the analysis of political trust.<br><br>
+There are no concrete variables defining the overall satisfaction with one’s economic situation, however, ESS6 participants were questioned on their satisfaction of household net income indicated by hincfel (Range: Living comfortably to very difficult on present income). We shall include this in the model and drop employment status, as both potentially correlate to great extent with few exceptions. This would give us a better indicator on how one’s economic situation relates to individual levels of political trust.<br><br><br><br>
+
+
+## Regression Models including covariates tvpol, poliintr & hincfel <br><br>
+> With the alteration of the election winner variable, we have seen that the statistical significance of the original treatment variable diminishes. This could lead to the assumption that > there are other covariates (grounding on conseptual exploration), that could contribute to further explanations in the variations of political trust levels.<br>
+> In our extended regression table, we included covariates in additional models following our previous theoretical discussion. The inclusion of covariates did not lead to statistical > significance of the original treatment variable, it did, however, highlights the potential significance of the covariates in question.<br>
+> While maintaining the original format of the region-fixed effects model, we can see that the political interest and economic satisfaction variable produce statistically significant  coefficients in the model (-0.42*** and -0.32* ,respectively). Accordingly, it would appear as that: the more politically interested and/or the less satisfied with one's economic situation , the smaller the level of political trust. <br><br> 
+ 
+```{r echo=FALSE}
+#Elections winner variable
+ESS_df_b$prtvtces = as.factor(ESS_df_b$prtvtces)
+ESS_df_b <- ESS_df_b %>% dplyr::mutate(election_winner = ifelse(prtvtces==1, 1, 
+                                                             ifelse(is.na(prtvtces)==TRUE, NA, 0)))
+
+#Recoding activity variable and generating dummies
+ESS_df_b <- ESS_df_b %>% dplyr::mutate(mnactic = as.factor(mnactic)) #converts numeric to factor
+
+ESS_df_b <- ESS_df_b %>% dplyr::mutate(employment = ifelse(mnactic == 4, 3,
+                                                        ifelse(mnactic == 6, 5,
+                                                              ifelse(mnactic == 8, 5, mnactic))))
+
+ESS_df_b <- ESS_df_b %>% dplyr::mutate(employment = ifelse(employment == 1, "Paid Work",
+                                                        ifelse(employment == 2, "In education",
+                                                              ifelse(employment == 3, "Unemployed", 
+                                                                     ifelse(employment == 5, "Out of labor market",
+                                                                             ifelse(employment == 8, "Out of labor market",
+                                                                                    ifelse(employment == 9, "Other", employment)))))))
+                                              
+emp_paid_work <- ESS_df_b %>% dplyr::mutate(emp_paid_work = ifelse(employment =="Paid Work", 1,0))
+emp_in_education <- ESS_df_b %>% dplyr::mutate(emp_in_education = ifelse(employment =="In education", 1,0))
+emp_unemployed <- ESS_df_b %>% dplyr::mutate(emp_unemployed = ifelse(employment =="Unemployed",1,0))
+emp_out_labor <- ESS_df_b %>% dplyr::mutate(emp_out_labor = ifelse(employment =="Out of labour market",1,0))
+emp_other <- ESS_df_b %>% dplyr::mutate(emp_other=ifelse(employment =="Other",1,0))   
+
+library(sjlabelled)
+ESS_df_b <- unlabel(ESS_df_b, verbose = FALSE)
+ESS_df_b_new <- ESS_df_b
+
+ESS_df_b_new <- ESS_df_b_new %>% dplyr::mutate(tvpol = 
+         ifelse(tvpol > 10 , NA, tvpol))
+
+#Recode and relevel the variable polintr so that the values follow the same format levels increase with interest rather than decrease
+ESS_df_b_new <- ESS_df_b_new %>% dplyr::mutate(polintr = 
+         ifelse(polintr == 1 , 4, 
+              ifelse(polintr == 2 , 3,
+                     ifelse(polintr == 3 , 2,
+                            ifelse(polintr == 4 , 1,
+                                   ifelse(polintr > 4 , NA, polintr))))))
+
+ESS_df_b_new <- ESS_df_b_new %>% dplyr::mutate(polintr = factor(polintr, levels = c(1, 2, 3, 4), labels=c("Not at all Interested", "Hardly Interested","Quite Interested", "Very Interested")))
+
+##to intitally look at the observed effect size, we would drop values that from the tvpol variable that do not influence media consumption (NAs, refused answers, etc.)
+
+
+#Model including tvpol variable + region-fixed effects
+Model_4 <-plm(trstplt ~ D_exposure_barcenas + election_winner + gndr + tvpol + eduyrs + agea + as.factor(employment),  
+index=("region"), data = ESS_df_b, model="within")
+
+#Model including  polintr variable + region-fixed effects
+Model_5 <-plm(trstplt ~ D_exposure_barcenas + election_winner + gndr + polintr + eduyrs + agea + as.factor(employment),  
+index=("region"), data = ESS_df_b, model="within")
+
+#Model including hincfel variable + region-fixed effects
+Model_6 <- plm(trstplt ~ D_exposure_barcenas + election_winner + gndr + hincfel + eduyrs + agea,  
+index=("region"), data = ESS_df_b, model="within")
+  
+#Model including hincfel & polintr variable + region-fixed effects
+Model_7 <- plm(trstplt ~ D_exposure_barcenas + election_winner + gndr + hincfel + polintr + eduyrs + agea, 
+index=("region"), data = ESS_df_b, model="within")
+
+stargazer::stargazer(Model_1, Model_2, Model_3, Model_4, Model_5, Model_6,Model_7,  header=FALSE, type="text",
+                     title = "Additional OLS regression models. Dependent variable: trust in politicians",
+                     align=TRUE,
+                     notes = "Standard errors in parentheses", 
+                     notes.align = "l",
+                               covariate.labels = c("D (Exposure to the Barcenas scandal)",
+                                          "Election winner (corrected)", 
+                                          "Female", 
+                                          "Tvpol", "Polintr", "Hincfel",
+                                          "Years of education", 
+                                          "Age", 
+                                          "Employment: Out of the labour market (Ref: Other)", 
+                                          "Employment: Paid Work (Ref: Other)",                                                                                              
+                                          "Employment: Unemployed (Ref: Other)", 
+                                          "Election winner*D (corrected)"),
+                     add.lines = list(c("Region Fixed Effects", "No", "Yes", "Yes", "Yes", "Yes", "Yes", "Yes")),
+                     model.names = FALSE,
+                     model.numbers = TRUE,
+                     dep.var.labels.include = TRUE,
+                     column.labels   = c("Author Models", "Additional Models"),
+                     column.separate = c(3, 4),
+                     omit.stat=c("LL","ser","f"), no.space=TRUE)
+
+                    
+```
+
+## Further analysis on matching methodology needed <br><br>
+> The researchers have conducted alternative estimation of the effects of the corruption scandal through exact matching and entropy balancing .(diminishes the mean difference of covariates between treatment and control groups). CEM like Exact Matching is subject to the curse of dimensionality, therefore making it in fact the less viable option for models with many covariates. <br>
+> Matching aims to reduce imbalance in the empirical distribution of the pre-treatment confounders between the treated and control groups (Stuart, 2010, p.13). Correct specification of Propensity score matching relies on balance checking. This is often done by assessing balanced joint distribution on each confounder, but this might require making certain assumptions on the model to estimate the treatment. Formulating diagnostics on the outcome of the model, before the model specification, might in turn create model dependence, where researchers would pick a model that fits their hypothesis. If data is fairly unbalanced, one might circumvent this paradox (King et. al, 2019).<br>
+> Following from the bar chart, the distribution of observations on the dependent variable  is not heavily imbalanced, however, there are considerably less observations in the higher tier of political trust levels and over 42% of observations are amongst those who picked 0 on political trust. Hence there is a larger disparity amongst higher and lower levels. By and large, further empirical analysis would be needed to test the viability of Propensity Score Matching in the original model, particularly to reweigh the dataset and the means of covariates again after correcting the election_winner variable.<br><br><br>
+```{r echo = FALSE}
+#Check for imbalances of dependent variable in data set
+library(sjlabelled)
+ESS_df_b <- ESS_df_b %>% mutate(trstplt_balance = as.factor(trstplt))
+trstplt_balance <- ESS_df_b %>% group_by(trstplt_balance) %>% summarize(avg_count = n())
+print(trstplt_balance/sum(trstplt_balance$avg_count))
+
+ggplot(ESS_df_b, aes(x= trstplt_balance)) + geom_bar(binwidth = 0.5, fill="steelblue")+ labs(title="Avg count of Political Trust Answers", 
+         x="political trust level", y = "counts")+
+  theme_minimal()
+```
+
+## **Conclusion**<br><br>
+> Our extension has shown that the adapting other theoretically motivated covariates in the models can widen the spectrum of individual bases for political trust. The results ,however, did not indicate that the remodelling would change the size of treatment effect of the original treatment variable (exposure to scandal) significantly. 
+Yet to draw any further conclusion one would have to extend the empirical analysis of the findings further as well as evaluating the methodology of balancing the data, matching the treatment and control groups and the like. All in all, we can conclude that there are potentially a much wider range of potential confounders that would mitigate the "corruption effcet" on political trust proposed by Ares and Hernández.<br><br><br><br>
+
+## **Bibliography**<br><br><br>
+* Coromina,L.,  Saris,W. ,Lilleoja, L.: “ESS-DACE - The European Social Survey - , RECSM Working Paper Number 25, Data for a Changing Europe”, 2012<br><br>
+
+* Hooghe, M. & Marien, S. (2013) A COMPARATIVE ANALYSIS OF THE RELATION BETWEEN POLITICAL TRUST AND FORMS OF POLITICAL PARTICIPATION IN EUROPE, European Societies, 15:1, 131-152, DOI: 10.1080/14616696.2012.692807<br><br>
+* Eurobarometer: Standard Eurobarometer 80: “MEDIA USE IN THE EUROPEAN UNION REPORT”, Fieldwork: November 2013, https://www.vau.net/system/files/documents/eb80_media_en.pdf
+Fletcher, R. & Park, S. (2017) The Impact of Trust in the News Media on Online News Consumption and Participation, Digital Journalism, 5:10, 1281-1299, DOI: 10.1080/21670811.2017.1279979<br><br>
+
+* Hetherington, J. M. & Husser, A. J. (2012). How Trust Matters: The Changing Political Relevance of Political Trust. Midwest Political Science Association. American Journal of Political Science 56(2): 312-325<br><br>
+
+* Kepplinger HM (1996) Skandale und Politikverdrossenheit – ein Langzeitvergleich [Scandals and political dissatisfaction – a long-term comparison]. In: Jarren O, Schatz H and Weßler H (eds) Medien und politischer Prozess: Politische Öffentlichkeit und massenmediale Politikvermittlung im Wandel. Opladen: Westdeutscher Verlag.<br><br>
+
+* King, Gary and Richard Nielsen. "Why Propensity Scores Should Not Be Used for Matching." Political Analysis 27, 4 (May 2019): 435-454. © 2019 <br><br>
+
+
+* Stuart, Elizabeth A. (2010): “Matching Methods for Causal Inference: A Review and a Look Forward”. In: Statistical Science, no. 1, vol. 25, pp. 1–21.<br><br>
+
+* Vaz Mondo, Bianca. “Electoral Accountability of Corrupt Politicians: Conditioning Factors Revisited.” Paper No. 55 European Research Centre for Anti-Corruption and State-Building Hertie School of Governance, May 2019. <br><br><br><br><br><br>
+
+ 
+## **Software Statement** <br><br>
+The analysis was run under OS X 10.15.7 using R version 4.1.0 (R Core Team 2021).<br> 
+The following R software packages were used: readr (Wickman, 2020), dplyr & haven (Wickham et al. 2021), ggplot2 (Wickham, 2009), drobust (Calonico, 2021), stargazer (Hlavac, 2018,  <mhlavac@alumni.princeton.edu>), knitr(Yihui Xie et.al, 2021), kableExtra (Hao Zhu, 2021), KernSmooth (Wand, 2020), 
+rdd (Dimmery, 2016), plm (Croissant, 2020), ggalt (Rudis [aut, cre], Bolker, 2017), ggthemes (Arnold [aut, cre], 2021, labelled (Larmarange, 2021), 
+sjlabelled (Lüdecke, 2021).<br><br><br><br><br><br>
+</div> 
